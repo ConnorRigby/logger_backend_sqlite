@@ -32,8 +32,11 @@ defmodule LoggerBackendEcto do
     opts = Keyword.merge(env, opts)
     Application.put_env(:logger, __MODULE__, opts)
     {:ok, pid} = Repo.start_link()
-    LoggerBackendEcto.Migrator.migrate()
-    {:ok, %{repo: pid}}
+    case LoggerBackendEcto.Migrator.migrate() do
+      migrated when is_list(migrated) ->
+        {:ok, %{repo: pid}}
+      err -> raise "Migrations failed: #{inspect err}"
+    end
   rescue
     ex -> {:error, ex}
   end
