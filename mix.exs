@@ -24,7 +24,8 @@ defmodule LoggerBackendEcto.MixProject do
   defp deps do
     [
       {:ecto, "~> 2.2"},
-      {:sqlite_ecto2, "~> 2.2.4-rc.0", optional: true}
+      {:sqlite_ecto2, "~> 2.2.4", optional: true},
+      {:ex_doc, "0.18.4", runtime: false, only: :docs}
     ]
   end
 
