@@ -32,6 +32,11 @@ config :logger, [
   backends: [:console, LoggerBackendEcto]
 ]
 
+config :logger_backend_ecto, [
+  max_logs: 9000 # defaults to 1000
+  trim_amnt: 3000 # defaults to 25% of `max_logs`
+]
+
 # This can be any adapter and config.
 config :logger_backend_ecto, LoggerBackendEcto.Repo, [
   adapter: Sqlite.Ecto2,
@@ -45,5 +50,6 @@ is configured properly.
 ```elixir
 iex()> {:ok, _} = Logger.add_backend(LoggerBackendEcto)
 require Logger
-Logger.debug "hey!"
+Logger.debug "hello, world!"
+[%LoggerBackendEcto.Log{level: "debug", message: "hello, world!"}] = LoggerBackendEcto.all()
 ```

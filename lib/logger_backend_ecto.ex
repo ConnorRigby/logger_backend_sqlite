@@ -9,8 +9,27 @@ defmodule LoggerBackendEcto do
   Logger.remove_backend(LoggerBackendEcto)
   """
 
+  require Logger
   alias LoggerBackendEcto.{Log, Repo}
+  import Ecto.Query
   @behaviour :gen_event
+
+  @max_logs Application.get_env(:logger_backend_ecto, :max_logs, 1000)
+  @trim_amnt Application.get_env(:logger_backend_ecto, :trim_amnt, round(@max_logs / 4))
+
+  @doc "Counts every log in the database."
+  def count_logs, do: Repo.one!(from l in Log, select: count(l.id))
+
+  @doc "Returns all logs."
+  def all_logs, do: Repo.all(Log)
+
+  # Trim @trim_amnt number of logs.
+  @doc false
+  def trim_logs(amount \\ @trim_amnt) do
+    # This could be better.
+    Repo.all(from l in Log, limit: ^amount)
+    |> Enum.map(&Repo.delete!/1)
+  end
 
   @default_meta [
     {:application, :string},
@@ -34,7 +53,9 @@ defmodule LoggerBackendEcto do
     {:ok, pid} = Repo.start_link()
     case LoggerBackendEcto.Migrator.migrate() do
       migrated when is_list(migrated) ->
-        {:ok, %{repo: pid}}
+        # timer = start_timer(self(), 0)
+        timer = make_ref()
+        {:ok, %{repo: pid, timer: timer}}
       err -> raise "Migrations failed: #{inspect err}"
     end
   rescue
@@ -61,14 +82,29 @@ defmodule LoggerBackendEcto do
     {:ok, dt} = DateTime.from_naive(ndt, "Etc/UTC")
 
     %Log{
+      message: to_string(text),
       group_leader_node: to_string(node(gl)),
       level: to_string(level),
       logged_at_ndt: ndt,
       logged_at_dt: if(utc?, do: dt),
-      message: to_string(text)
     }
     |> update_meta(meta)
     |> Repo.insert!()
+    {:ok, state}
+  end
+
+  @impl :gen_event
+  def handle_info(:max_logs_checkup, state) do
+    case count_logs() do
+      count when count >= @max_logs ->
+        Logger.debug "trimming #{@trim_amnt} logs from LoggerBackendEcto"
+        trim_logs(@trim_amnt)
+        {:ok, %{state | timer: start_timer(self())}}
+      _ -> {:ok, state}
+    end
+  end
+
+  def handle_info(_, state) do
     {:ok, state}
   end
 
@@ -81,6 +117,10 @@ defmodule LoggerBackendEcto do
   def terminate(_reason, state) do
     Repo.stop(state.repo)
     :ok
+  end
+
+  defp start_timer(pid, timeoutms \\ 30_000) do
+    Process.send_after(pid, :max_logs_checkup, timeoutms)
   end
 
   defp update_meta(log, meta) do
