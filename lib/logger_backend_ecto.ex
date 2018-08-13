@@ -50,11 +50,12 @@ defmodule LoggerBackendEcto do
     env = Application.get_env(:logger, __MODULE__, [])
     opts = Keyword.merge(env, opts)
     Application.put_env(:logger, __MODULE__, opts)
+    Process.flag(:trap_exit, true)
     {:ok, pid} = Repo.start_link()
+    Process.monitor(pid)
     case LoggerBackendEcto.Migrator.migrate() do
       migrated when is_list(migrated) ->
-        # timer = start_timer(self(), 0)
-        timer = make_ref()
+        timer = start_timer(self(), 0)
         {:ok, %{repo: pid, timer: timer}}
       err -> raise "Migrations failed: #{inspect err}"
     end
@@ -75,25 +76,40 @@ defmodule LoggerBackendEcto do
     {:ok, state}
   end
 
+  def handle_event(_, %{repo: nil} = state) do
+    {:ok, state}
+  end
+
   @impl :gen_event
   def handle_event({level, gl, {Logger, text, {{yr, m, d}, {hr, min, sec, _}}, meta}}, state) do
     utc? = Application.get_env(:logger, :utc_log, false)
     ndt = %NaiveDateTime{year: yr, month: m, day: d, minute: min, second: sec, hour: hr}
     {:ok, dt} = DateTime.from_naive(ndt, "Etc/UTC")
 
-    %Log{
-      message: to_string(text),
-      group_leader_node: to_string(node(gl)),
-      level: to_string(level),
-      logged_at_ndt: ndt,
-      logged_at_dt: if(utc?, do: dt),
-    }
-    |> update_meta(meta)
-    |> Repo.insert!()
+    try do
+      %Log{
+        message: to_string(text),
+        group_leader_node: to_string(node(gl)),
+        level: to_string(level),
+        logged_at_ndt: ndt,
+        logged_at_dt: if(utc?, do: dt),
+      }
+      |> update_meta(meta)
+      |> Repo.insert!()
+      {:ok, state}
+    rescue
+      # Hack to check for Ecto being stopped.
+      _ in ArgumentError ->
+        {:ok, %{state | repo: nil}}
+      err ->
+        reraise(err, System.stacktrace())
+    end
     {:ok, state}
   end
 
   @impl :gen_event
+  def handle_info(_, %{repo: nil} = state), do: {:ok, state}
+
   def handle_info(:max_logs_checkup, state) do
     case count_logs() do
       count when count >= @max_logs ->
@@ -104,18 +120,16 @@ defmodule LoggerBackendEcto do
     end
   end
 
-  def handle_info(_, state) do
-    {:ok, state}
-  end
+  def handle_info(_, state), do: {:ok, state}
 
   @impl :gen_event
-  def code_change(_old_vsn, state, _extra) do
-    {:ok, state}
-  end
+  def code_change(_old_vsn, state, _extra), do: {:ok, state}
 
   @impl :gen_event
   def terminate(_reason, state) do
-    Repo.stop(state.repo)
+    if state.repo && Process.alive?(state.repo) do
+      Repo.stop(state.repo)
+    end
     :ok
   end
 
