@@ -1,10 +1,10 @@
-defmodule LoggerBackendEcto.MixProject do
+defmodule LoggerBackendSqlite.MixProject do
   use Mix.Project
 
   def project do
     [
-      app: :logger_backend_ecto,
-      version: "1.3.0",
+      app: :logger_backend_sqlite,
+      version: "2.0.0",
       elixir: "~> 1.4",
       start_permanent: Mix.env() == :prod,
       deps: deps(),
@@ -23,7 +23,7 @@ defmodule LoggerBackendEcto.MixProject do
   # Run "mix help deps" to learn about dependencies.
   defp deps do
     [
-      {:sqlite_ecto2, "~> 2.2", optional: true},
+      {:esqlite, "~> 0.2.4"},
       {:ex_doc, "~> 0.19", runtime: false, only: :docs}
     ]
   end
@@ -31,8 +31,10 @@ defmodule LoggerBackendEcto.MixProject do
   defp description, do: "Logger backend for saving logs in an Ecto repo."
 
   defp package do
-    [maintainers: ["Connor Rigby"],
+    [
+      maintainers: ["Connor Rigby"],
       licenses: ["MIT"],
-      links: %{"Github" => "https://github.com/connorrigby/logger_backend_ecto"}]
+      links: %{"Github" => "https://github.com/connorrigby/logger_backend_sqlite"}
+    ]
   end
 end
