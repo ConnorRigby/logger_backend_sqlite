@@ -28,7 +28,7 @@ defmodule LoggerBackendSqlite.MixProject do
     ]
   end
 
-  defp description, do: "Logger backend for saving logs in an Ecto repo."
+  defp description, do: "Logger backend for saving logs in an sqlite3 database."
 
   defp package do
     [
