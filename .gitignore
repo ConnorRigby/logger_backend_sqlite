@@ -23,3 +23,6 @@ erl_crash.dump
 logger_backend_sqlite-*.tar
 *.sqlite3
 /logs
+
+# VSCode plugin
+.elixir_ls

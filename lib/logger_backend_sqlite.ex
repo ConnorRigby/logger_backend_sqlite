@@ -11,20 +11,49 @@ defmodule LoggerBackendSqlite do
 
   require Logger
   alias LoggerBackendSqlite.Log
-  defstruct [:dbname, :db, :stmt, :max_logs, :trim_amount, :timer]
-  alias __MODULE__, as: State
 
+  defstruct [
+    :dbname,
+    :db,
+    :insert_stmt,
+    :delete_stmt,
+    :max_logs,
+    :trim_amount,
+    :trim_frequency,
+    :timer
+  ]
+
+  @opaque db :: {:connection, reference(), reference()}
+  @opaque stmt :: {:statement, reference(), db}
+
+  @type t :: %__MODULE__{
+          dbname: list(),
+          db: db(),
+          insert_stmt: stmt(),
+          delete_stmt: stmt(),
+          max_logs: pos_integer(),
+          trim_amount: pos_integer(),
+          trim_frequency: pos_integer(),
+          timer: reference()
+        }
+
+  @type log :: Log.t()
+
+  alias __MODULE__, as: State
   @behaviour :gen_event
 
   @doc "Counts every log in the database."
+  @spec count_logs() :: 0 | pos_integer
   def count_logs(),
     do: :gen_event.call(Logger, LoggerBackendSqlite, :count_all_logs, :infinity)
 
   @doc "Returns all logs."
+  @spec all_logs() :: [log]
   def all_logs(),
     do: :gen_event.call(Logger, LoggerBackendSqlite, :get_all_logs, :infinity)
 
   @doc "Returns a File.Stat of the database, or :memory if not backed by file."
+  @spec stat() :: :memory | File.Stat.t()
   def stat(),
     do: :gen_event.call(Logger, LoggerBackendSqlite, :stat, :infinity)
 
@@ -32,16 +61,9 @@ defmodule LoggerBackendSqlite do
   def get_state(),
     do: :gen_event.call(Logger, LoggerBackendSqlite, :get_state, :infinity)
 
-  @default_meta [
-    {:application, :string},
-    {:module, :string},
-    {:function, :string},
-    {:file, :string},
-    {:line, :integer},
-    {:registered_name, :string}
-  ]
-
   @impl :gen_event
+  @spec init(LoggerBackendSqlite | {LoggerBackendSqlite, keyword()}) ::
+          {:ok, LoggerBackendSqlite.t()}
   def init(__MODULE__) do
     init({__MODULE__, []})
   end
@@ -92,39 +114,54 @@ defmodule LoggerBackendSqlite do
     ndt = %NaiveDateTime{year: yr, month: m, day: d, minute: min, second: sec, hour: hr}
     {:ok, dt} = DateTime.from_naive(ndt, "Etc/UTC")
 
-    try do
-      %Log{
-        message: to_string(iodata),
-        group_leader_node: to_string(node(gl)),
-        level: to_string(level),
-        logged_at_ndt: ndt,
-        logged_at_dt: if(utc?, do: dt)
-      }
-      |> update_log_meta(meta)
-      |> insert_log(state)
-
-      {:ok, state}
-    rescue
-      ex ->
-        IO.warn(
-          ["Failed to insert log into sqlite: ", Exception.message(ex)],
-          System.stacktrace()
-        )
+    do_insert = fn ->
+      try do
+        %Log{
+          message: to_string(iodata),
+          group_leader_node: to_string(node(gl)),
+          level: to_string(level),
+          logged_at_ndt: ndt,
+          logged_at_dt: if(utc?, do: dt)
+        }
+        |> update_log_meta(meta)
+        |> insert_log(state)
 
         {:ok, state}
+      rescue
+        ex ->
+          Logger.warn(["Failed to insert log into sqlite: ", Exception.message(ex)], store: false)
+
+          {:ok, state}
+      end
+    end
+
+    if Keyword.get(meta, :store, true) do
+      do_insert.()
+    else
+      {:ok, state}
     end
   end
 
   @impl :gen_event
-  def handle_info(:max_logs_checkup, %State{max_logs: max_logs} = state) do
+  def handle_info(:max_logs_checkup, %State{max_logs: max_logs, trim_frequency: freq} = state) do
     case do_count(state) do
       count when count >= max_logs ->
-        IO.puts("trimming #{state.trim_amount} logs from LoggerBackendSqlite")
+        Logger.debug("trimming #{state.trim_amount} logs from LoggerBackendSqlite", store: false)
         do_trim(state)
-        {:ok, %State{state | timer: start_timer(self())}}
+        new_count = do_count(state)
+
+        msg = [
+          to_string(count - new_count),
+          " logs trimmed from LoggerBackendSqlite ",
+          to_string(new_count),
+          " remaining."
+        ]
+
+        Logger.debug(msg, store: false)
+        {:ok, %State{state | timer: start_timer(self(), freq)}}
 
       _ ->
-        {:ok, %State{state | timer: start_timer(self())}}
+        {:ok, %State{state | timer: start_timer(self(), freq)}}
     end
   end
 
@@ -139,22 +176,24 @@ defmodule LoggerBackendSqlite do
     :ok
   end
 
-  defp start_timer(pid, timeoutms \\ 30_000) do
+  defp start_timer(pid, timeoutms) do
     Process.send_after(pid, :max_logs_checkup, timeoutms)
   end
 
+  @spec init_db(Keyword.t()) :: t()
   defp init_db(opts) do
     create =
-    'CREATE TABLE IF NOT EXISTS "elixir_logs" ("id" INTEGER PRIMARY KEY, "level" ' ++
-      'TEXT, "group_leader_node" TEXT, "message" TEXT, "logged_at_ndt" ' ++
-      'NAIVE_DATETIME, "logged_at_dt" UTC_DATETIME, "application" TEXT, ' ++
-      '"module" TEXT, "function" TEXT, "file" TEXT, "line" INTEGER, "registered_name" ' ++
-      'TEXT, "inserted_at" NAIVE_DATETIME NOT NULL, "updated_at" NAIVE_DATETIME NOT NULL)'
+      'CREATE TABLE IF NOT EXISTS "elixir_logs" ("id" INTEGER PRIMARY KEY, "level" ' ++
+        'TEXT, "group_leader_node" TEXT, "message" TEXT, "logged_at_ndt" ' ++
+        'NAIVE_DATETIME, "logged_at_dt" UTC_DATETIME, "application" TEXT, ' ++
+        '"module" TEXT, "function" TEXT, "file" TEXT, "line" INTEGER, "registered_name" ' ++
+        'TEXT, "inserted_at" NAIVE_DATETIME NOT NULL, "updated_at" NAIVE_DATETIME NOT NULL)'
 
     # Collect default opts.
     dbname = Keyword.get(opts, :database, ':memory:')
     max_logs = Keyword.get(opts, :max_logs, 1000)
     trim_amount = Keyword.get(opts, :trim_amount, max_logs / 4)
+    trim_frequency = Keyword.get(opts, :trim_frequencey, 30_000)
 
     # Open and setup db.
     {:ok, db} = :esqlite3.open(to_charlist(dbname))
@@ -165,21 +204,30 @@ defmodule LoggerBackendSqlite do
       'insert into elixir_logs values(' ++
         '?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14' ++ ')'
 
-    {:ok, stmt} = :esqlite3.prepare(insert, db)
+    delete =
+      'DELETE FROM elixir_logs WHERE id IN (' ++
+        'SELECT id FROM elixir_logs ORDER BY id ASC LIMIT ?1' ++ ')'
+
+    {:ok, insert_stmt} = :esqlite3.prepare(insert, db)
+    {:ok, delete_stmt} = :esqlite3.prepare(delete, db)
+
     %State{
       db: db,
       dbname: dbname,
-      stmt: stmt,
+      insert_stmt: insert_stmt,
+      delete_stmt: delete_stmt,
       timer: start_timer(self(), 0),
       trim_amount: round(trim_amount),
+      trim_frequency: trim_frequency,
       max_logs: max_logs
     }
   end
 
-  defp insert_log(%Log{} = log, %State{stmt: stmt}) do
+  @spec insert_log(log(), t()) :: :ok
+  defp insert_log(%Log{} = log, %State{insert_stmt: stmt}) do
     :ok =
       :esqlite3.bind(stmt, [
-        # id 
+        # id
         :undefined,
         log.level || :undefined,
         log.group_leader_node || :undefined,
@@ -197,22 +245,23 @@ defmodule LoggerBackendSqlite do
       ])
 
     :"$done" = :esqlite3.step(stmt)
+    :ok
   end
 
-  defp do_count(state) do
-    [{count}] = :esqlite3.q('select count(*) from elixir_logs', state.db)
+  @spec do_count(t()) :: 0 | pos_integer()
+  defp do_count(%State{db: db}) do
+    [{count}] = :esqlite3.q('select count(*) from elixir_logs', db)
     count
   end
 
-  defp do_trim(%State{db: db, trim_amount: amount}) do
-    # SQL injection lol
-    q =
-      'DELETE FROM elixir_logs WHERE id IN ' ++
-        '(SELECT id FROM elixir_logs ORDER BY id ASC LIMIT #{amount})'
-
-    :ok = :esqlite3.exec(q, db)
+  @spec do_trim(t()) :: :ok
+  defp do_trim(%State{trim_amount: amount, delete_stmt: stmt}) do
+    :ok = :esqlite3.bind(stmt, [amount])
+    :"$done" = :esqlite3.step(stmt, :infinity)
+    :ok
   end
 
+  @spec to_log(tuple()) :: log()
   defp to_log(log) when tuple_size(log) == 14 do
     %{
       id: elem(log, 0),
@@ -243,14 +292,16 @@ defmodule LoggerBackendSqlite do
 
   defp do_update_log_meta({_key, nil}, log), do: log
 
-  for {key, type} <- @default_meta do
-    defp do_update_log_meta({unquote(key), value}, log) do
-      case unquote(type) do
-        :string -> %{log | unquote(key) => to_string(value)}
-        :integer when is_integer(value) -> %{log | unquote(key) => value}
-      end
-    end
-  end
+  defp do_update_log_meta({:application, value}, log), do: %{log | application: to_string(value)}
+  defp do_update_log_meta({:module, value}, log), do: %{log | application: to_string(value)}
+  defp do_update_log_meta({:function, value}, log), do: %{log | application: to_string(value)}
+  defp do_update_log_meta({:file, value}, log), do: %{log | application: to_string(value)}
+
+  defp do_update_log_meta({:line, value}, log) when is_integer(value),
+    do: %{log | application: value}
+
+  defp do_update_log_meta({:registered_name, value}, log),
+    do: %{log | application: to_string(value)}
 
   defp do_update_log_meta({_k, _v}, log), do: log
 end

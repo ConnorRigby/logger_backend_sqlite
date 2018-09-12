@@ -11,4 +11,5 @@ config :logger,
 config :logger, LoggerBackendSqlite,
   database: 'debug_logs.sqlite3',
   max_logs: 1000,
-  trim_amnt: round(1000 / 4)
+  trim_amount: 55000,
+  trim_frequency: 1000

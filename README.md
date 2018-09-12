@@ -34,7 +34,7 @@ config :logger, [
 config :logger, LoggerBackendSqlite,
   database: 'debug_logs.sqlite3',
   max_logs: 9000, # defaults to 1000
-  trim_amnt: 3000 # defaults to 25% of `max_logs`
+  trim_amount: 3000 # defaults to 25% of `max_logs`
 ```
 
 You can also add the backend at runtime.
