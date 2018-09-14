@@ -1,4 +1,6 @@
 # LoggerBackendSqlite
+[![CircleCI](https://circleci.com/gh/ConnorRigby/logger_backend_sqlite.svg?style=svg)](https://circleci.com/gh/ConnorRigby/logger_backend_sqlite)
+[![Hex version](https://img.shields.io/hexpm/v/logger_backend_sqlite.svg "Hex version")](https://hex.pm/packages/logger_backend_sqlite)
 
 ## What is it?
 LoggerBackendSqlite will allow you to save all of your logs to an sqlite3 database.
@@ -72,6 +74,48 @@ iex(4)> LoggerBackendSqlite.all_logs
     updated_at: "2018-09-12 01:33:16.341661"
   }
 ]
+```
+
+## Nerves is it?
+Using this on Nerves is pretty straightforward, but there is a gotcha.
+Nerves devices use a read only filesystem, so you need to ensure you store
+the database on a writable filesystem. You have two options. 
+
+### /tmp
+`/tmp` is read write, but will be cleared _every_ boot and has a pretty 
+small size constraint. This can be useful if you only want a few logs from
+a specific time.
+
+### /root
+`/root` is the default location for your application data. There is another
+gotcha on this one, that on first boot, this partition will not be ready yet.
+A simple work can be found below:
+
+in your config.exs
+```elixir
+  use Mix.Config
+  config :logger, LoggerBackendSqlite, [
+    database: "/tmp/logs.sqlite"
+  ]
+```
+
+then in your application code somewhere:
+```elixir
+defmodule MyApp.FileSystemCheckup do
+  @database "/root/logs.sqlite"
+  @check_file "/root/check"
+  require Logger
+   
+  def checkup do
+    case File.write(@check_file, "any ole data") do
+      :ok -> Logger.configure_backend(LoggerBackendSqlite, [database: @database])
+      {:error, _} -> 
+        Logger.warn "Application data partition not ready yet"
+        Proess.sleep(2000)
+        checkup()
+    end
+  end
+end
 ```
 
 ## Why 2.0 is it?
