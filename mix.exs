@@ -25,7 +25,7 @@ defmodule LoggerBackendSqlite.MixProject do
     [
       {:esqlite, "~> 0.2.4"},
       {:dialyxir, "1.0.0-rc.3", runtime: false, only: [:dev, :test]},
-      {:ex_doc, "~> 0.19", runtime: false, only: :docs}
+      {:ex_doc, "~> 0.19", runtime: false, only: [:docs, :test]}
     ]
   end
 
