@@ -27,6 +27,7 @@ defmodule LoggerBackendSqliteTest do
   end
 
   test "configures db at runtime", %{filename: filename} do
+    Application.put_env(:logger, LoggerBackendSqlite, database: ":memory:")
     Logger.add_backend(LoggerBackendSqlite)
     Logger.debug(inspect(__ENV__.function))
     Logger.flush()
