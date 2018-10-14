@@ -16,11 +16,7 @@ defmodule LoggerBackendSqlite do
     :dbname,
     :db,
     :insert_stmt,
-    :delete_stmt,
-    :max_logs,
-    :trim_amount,
-    :trim_frequency,
-    :timer
+    :max_logs
   ]
 
   @opaque db :: {:connection, reference(), reference()}
@@ -29,34 +25,21 @@ defmodule LoggerBackendSqlite do
   @type uninitialized() :: %__MODULE__{
           dbname: charlist(),
           max_logs: pos_integer(),
-          trim_amount: pos_integer(),
-          trim_frequency: pos_integer(),
           db: nil,
-          insert_stmt: nil,
-          delete_stmt: nil,
-          timer: nil
+          insert_stmt: nil
         }
 
   @type initialized :: %__MODULE__{
           db: db(),
           insert_stmt: stmt(),
-          delete_stmt: stmt(),
           dbname: charlist(),
-          max_logs: pos_integer(),
-          trim_amount: pos_integer(),
-          trim_frequency: pos_integer(),
-          timer: reference()
+          max_logs: pos_integer()
         }
 
   @type log :: Log.t()
 
   alias __MODULE__, as: State
   @behaviour :gen_event
-
-  @doc "Counts every log in the database."
-  @spec count_logs() :: 0 | pos_integer
-  def count_logs(),
-    do: :gen_event.call(Logger, LoggerBackendSqlite, :count_all_logs, :infinity)
 
   @doc "Returns all logs."
   @spec all_logs() :: [log]
@@ -109,11 +92,6 @@ defmodule LoggerBackendSqlite do
   def handle_call(:get_all_logs, %State{db: db} = state) do
     reply = :esqlite3.map(&to_log/1, 'select * from elixir_logs', db)
     {:ok, reply, state}
-  end
-
-  # :infinity timeout.
-  def handle_call(:count_all_logs, state) do
-    {:ok, do_count(state), state}
   end
 
   # :infinity timeout.
@@ -188,28 +166,6 @@ defmodule LoggerBackendSqlite do
     {:ok, init_db(new_state)}
   end
 
-  def handle_info(:max_logs_checkup, %State{max_logs: max_logs, trim_frequency: freq} = state) do
-    case do_count(state) do
-      count when count >= max_logs ->
-        Logger.debug("trimming #{state.trim_amount} logs from LoggerBackendSqlite", store: false)
-        do_trim(state)
-        new_count = do_count(state)
-
-        msg = [
-          to_string(count - new_count),
-          " logs trimmed from LoggerBackendSqlite ",
-          to_string(new_count),
-          " remaining."
-        ]
-
-        Logger.debug(msg, store: false)
-        {:ok, %State{state | timer: start_timer(self(), freq)}}
-
-      _ ->
-        {:ok, %State{state | timer: start_timer(self(), freq)}}
-    end
-  end
-
   def handle_info(_, state), do: {:ok, state}
 
   @impl :gen_event
@@ -221,22 +177,14 @@ defmodule LoggerBackendSqlite do
     :ok
   end
 
-  defp start_timer(pid, timeoutms) do
-    Process.send_after(pid, :max_logs_checkup, timeoutms)
-  end
-
   @spec extract_opts(Keyword.t()) :: uninitialized()
   defp extract_opts(opts) do
     # Collect default opts.
     dbname = Keyword.get(opts, :database, ':memory:') |> to_charlist()
     max_logs = Keyword.get(opts, :max_logs, 1000)
-    trim_amount = Keyword.get(opts, :trim_amount, max_logs / 4)
-    trim_frequency = Keyword.get(opts, :trim_frequencey, 30_000)
 
     %State{
       dbname: dbname,
-      trim_amount: round(trim_amount),
-      trim_frequency: trim_frequency,
       max_logs: max_logs
     }
   end
@@ -250,36 +198,37 @@ defmodule LoggerBackendSqlite do
         '"module" TEXT, "function" TEXT, "file" TEXT, "line" INTEGER, "registered_name" ' ++
         'TEXT, "inserted_at" NAIVE_DATETIME NOT NULL, "updated_at" NAIVE_DATETIME NOT NULL)'
 
+    create_trigger =
+      'CREATE TRIGGER IF NOT EXISTS "max_logs_trigger" ' ++
+        'BEFORE INSERT ON "elixir_logs" ' ++
+        'WHEN (SELECT COUNT(*) FROM "elixir_logs") >= #{state.max_logs} ' ++
+        'BEGIN ' ++
+        'DELETE FROM "elixir_logs" WHERE ' ++
+        'id = (SELECT MIN(id) FROM "elixir_logs"); ' ++ 'END'
+
     # Open and setup db.
     {:ok, db} = :esqlite3.open(state.dbname)
     :ok = :esqlite3.exec(create, db)
+    :ok = :esqlite3.exec(create_trigger, db)
 
     # Insert statement for teh speedz.
     insert =
       'insert into elixir_logs values(' ++
         '?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14' ++ ')'
 
-    delete =
-      'DELETE FROM elixir_logs WHERE id IN (' ++
-        'SELECT id FROM elixir_logs ORDER BY id ASC LIMIT ?1' ++ ')'
-
     {:ok, insert_stmt} = :esqlite3.prepare(insert, db)
-    {:ok, delete_stmt} = :esqlite3.prepare(delete, db)
 
     %State{
       state
       | db: db,
-        insert_stmt: insert_stmt,
-        delete_stmt: delete_stmt,
-        timer: start_timer(self(), 0)
+        insert_stmt: insert_stmt
     }
   end
 
   @spec close_db(initialized()) :: uninitialized()
   defp close_db(%State{} = state) do
     :esqlite3.close(state.db)
-    state.timer && Process.cancel_timer(state.timer)
-    %State{state | db: nil, delete_stmt: nil, insert_stmt: nil, timer: nil}
+    %State{state | db: nil, insert_stmt: nil}
   end
 
   @spec insert_log(log(), initialized()) :: :ok
@@ -304,19 +253,6 @@ defmodule LoggerBackendSqlite do
       ])
 
     :"$done" = :esqlite3.step(stmt)
-    :ok
-  end
-
-  @spec do_count(initialized()) :: 0 | pos_integer()
-  defp do_count(%State{db: db}) do
-    [{count}] = :esqlite3.q('select count(*) from elixir_logs', db)
-    count
-  end
-
-  @spec do_trim(initialized()) :: :ok
-  defp do_trim(%State{trim_amount: amount, delete_stmt: stmt}) do
-    :ok = :esqlite3.bind(stmt, [amount])
-    :"$done" = :esqlite3.step(stmt, :infinity)
     :ok
   end
 

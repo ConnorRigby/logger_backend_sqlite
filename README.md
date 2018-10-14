@@ -36,7 +36,6 @@ config :logger, [
 config :logger, LoggerBackendSqlite,
   database: 'debug_logs.sqlite3',
   max_logs: 9000, # defaults to 1000
-  trim_amount: 3000 # defaults to 25% of `max_logs`
 ```
 
 You can also add the backend at runtime.
@@ -53,9 +52,9 @@ iex(1)> require Logger
 Logger
 iex(2)> Logger.debug "hey!!"
 :ok
-iex(3)> 
+iex(3)>
 01:33:16.341 [debug] hey!!
-iex(4)> LoggerBackendSqlite.all_logs                                                           
+iex(4)> LoggerBackendSqlite.all_logs
 [
   %LoggerBackendSqlite.Log{
     application: nil,
@@ -79,10 +78,10 @@ iex(4)> LoggerBackendSqlite.all_logs
 ## Nerves is it?
 Using this on Nerves is pretty straightforward, but there is a gotcha.
 Nerves devices use a read only filesystem, so you need to ensure you store
-the database on a writable filesystem. You have two options. 
+the database on a writable filesystem. You have two options.
 
 ### /tmp
-`/tmp` is read write, but will be cleared _every_ boot and has a pretty 
+`/tmp` is read write, but will be cleared _every_ boot and has a pretty
 small size constraint. This can be useful if you only want a few logs from
 a specific time.
 
@@ -105,11 +104,11 @@ defmodule MyApp.FileSystemCheckup do
   @database "/root/logs.sqlite"
   @check_file "/root/check"
   require Logger
-   
+
   def checkup do
     case File.write(@check_file, "any ole data") do
       :ok -> Logger.configure_backend(LoggerBackendSqlite, [database: @database])
-      {:error, _} -> 
+      {:error, _} ->
         Logger.warn "Application data partition not ready yet"
         Proess.sleep(2000)
         checkup()
@@ -119,6 +118,6 @@ end
 ```
 
 ## Why 2.0 is it?
-This is a hard fork of [logger_backend_ecto](https://github.com/ConnorRigby/logger_backend_ecto). 
+This is a hard fork of [logger_backend_ecto](https://github.com/ConnorRigby/logger_backend_ecto).
 It is 1.0, and I didn't want any confusion that these are not the same thing, even
-tho they share the same public API. 
+tho they share the same public API.
