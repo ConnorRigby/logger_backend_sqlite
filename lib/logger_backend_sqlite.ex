@@ -288,15 +288,15 @@ defmodule LoggerBackendSqlite do
   defp do_update_log_meta({_key, nil}, log), do: log
 
   defp do_update_log_meta({:application, value}, log), do: %{log | application: to_string(value)}
-  defp do_update_log_meta({:module, value}, log), do: %{log | application: to_string(value)}
-  defp do_update_log_meta({:function, value}, log), do: %{log | application: to_string(value)}
-  defp do_update_log_meta({:file, value}, log), do: %{log | application: to_string(value)}
+  defp do_update_log_meta({:module, value}, log), do: %{log | module: to_string(value)}
+  defp do_update_log_meta({:function, value}, log), do: %{log | function: to_string(value)}
+  defp do_update_log_meta({:file, value}, log), do: %{log | file: to_string(value)}
 
   defp do_update_log_meta({:line, value}, log) when is_integer(value),
-    do: %{log | application: value}
+    do: %{log | line: value}
 
   defp do_update_log_meta({:registered_name, value}, log),
-    do: %{log | application: to_string(value)}
+    do: %{log | registered_name: to_string(value)}
 
   defp do_update_log_meta({_k, _v}, log), do: log
 end
