@@ -5,7 +5,7 @@ defmodule LoggerBackendSqlite.MixProject do
     [
       app: :logger_backend_sqlite,
       version: "2.2.0",
-      elixir: "~> 1.4",
+      elixir: "~> 1.7",
       start_permanent: Mix.env() == :prod,
       deps: deps(),
       description: description(),
@@ -23,9 +23,9 @@ defmodule LoggerBackendSqlite.MixProject do
   # Run "mix help deps" to learn about dependencies.
   defp deps do
     [
-      {:esqlite, "~> 0.2.4"},
-      {:dialyxir, "1.0.0-rc.3", runtime: false, only: [:dev, :test]},
-      {:ex_doc, "~> 0.19", runtime: false, only: [:docs, :test]}
+      {:esqlite, "~> 0.3"},
+      {:dialyxir, "1.0.0-rc.6", runtime: false, only: [:dev, :test]},
+      {:ex_doc, "~> 0.20", runtime: false, only: [:docs, :test]}
     ]
   end
 
