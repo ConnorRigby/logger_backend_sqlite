@@ -1,3 +1,8 @@
+# v2.4.0
+
+## Updated deps
+  * `esqlite` ~> 0.4
+
 # v2.3.0
 
 ## Bug fixes
@@ -6,7 +11,7 @@
     * `:function`
     * `:file`
     * `:line`
-    * `:registered_name` 
+    * `:registered_name`
 
 ## Updated deps
   * `esqlite` ~> 0.3
@@ -15,7 +20,7 @@
 # v2.2.0
 
 ## Bug fixes
-  * Fix bad math in circular buffer system. 
+  * Fix bad math in circular buffer system.
 
 # v2.1.0
 
