@@ -23,7 +23,7 @@ defmodule LoggerBackendSqlite.MixProject do
   # Run "mix help deps" to learn about dependencies.
   defp deps do
     [
-      {:esqlite, "~> 0.3"},
+      {:esqlite, "~> 0.4"},
       {:dialyxir, "1.0.0-rc.6", runtime: false, only: [:dev, :test]},
       {:ex_doc, "~> 0.20", runtime: false, only: [:docs, :test]}
     ]
